@@ -44,3 +44,54 @@ class forrester(function1d):
 		return fval.reshape(n,1) + noise
 
 
+class twohumps(function1d):
+	#http://infinity77.net/global_optimization/test_functions_1d.html
+	#Problem02
+
+	def __init__(self):
+		self.input_dim = 1		
+		self.min = 5.145 		## approx
+		self.fmin = -1.899 			## approx
+		self.bounds = [(2.7,7.5)]
+
+	def f(self,X):
+		X = X.reshape((len(X),1))
+		n = X.shape[0]
+		fval = np.sin(X) + np.sin((10.0/3.0)*X)
+		return fval.reshape(n,1)
+
+
+class twohumps2(function1d):
+	#http://infinity77.net/global_optimization/test_functions_1d.html
+	#Problem07
+
+	def __init__(self):
+		self.input_dim = 1		
+		self.min = 5.199 		## approx
+		self.fmin = -1.601			## approx
+		self.bounds = [(2.7,7.5)]
+
+	def f(self,X):
+		X = X.reshape((len(X),1))
+		n = X.shape[0]
+		fval = np.sin(X) + np.sin((10.0/3.0)*X) + np.log(X) - (0.84*X) + 3
+		return fval.reshape(n,1)
+
+class twohumps_2op(function1d):
+	#http://infinity77.net/global_optimization/test_functions_1d.html
+	#Problem07
+
+	def __init__(self):
+		self.input_dim = 1		
+		self.min = 5.199 		## approx
+		self.fmin = -1.601			## approx
+		self.bounds = [(2.7,7.5)]
+
+	def f(self,X):
+		X = X.reshape((len(X),1))
+		n = X.shape[0]
+		fval1 = np.sin(X) + np.sin((10.0/3.0)*X)
+		fval2 = (2*np.cos(X)) + np.cos(2*X) #np.sin(X) + np.sin((10.0/3.0)*X) + np.log(X) - (0.84*X) + 3
+		return np.concatenate((fval1,fval2),axis=1) 
+
+

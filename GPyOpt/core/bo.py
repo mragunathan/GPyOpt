@@ -13,7 +13,7 @@ from ..core.errors import InvalidConfigError
 from ..core.task.cost import CostModel
 from ..optimization.acquisition_optimizer import ContextManager
 try:
-    from ..plotting.plots_bo import plot_acquisition, plot_convergence
+    from ..plotting.plots_bo import plot_acquisition, plot_acquisition2, plot_convergence
 except:
     pass
 
@@ -51,6 +51,10 @@ class BO(object):
         self.model_parameters_iterations = None
         self.context = None
         self.num_acquisitions = 0
+        #ragu - start
+        self.bo_cost_type = "rmse"
+        self.rmse_dict_list = []
+        #ragu - end
 
     def suggest_next_locations(self, context = None, pending_X = None, ignored_X = None):
         """
@@ -77,12 +81,11 @@ class BO(object):
         :param max_iter: exploration horizon, or number of acquisitions. If nothing is provided optimizes the current acquisition.
         :param max_time: maximum exploration horizon in seconds.
         :param eps: minimum distance between two consecutive x's to keep running the model.
-        :param context: fixes specified variables to a particular context (values) for the optimization run (default, None).
         :param verbosity: flag to print the optimization results after each iteration (default, False).
-        :param report_file: file to which the results of the optimization are saved (default, None).
-        :param evaluations_file: file to which the evalations are saved (default, None).
-        :param models_file: file to which the model parameters are saved (default, None).
+        :param report_file: filename of the file where the results of the optimization are saved (default, None).
+        :param context: fixes specified variables to a particular context (values) for the optimization run (default, None).
         """
+        print("#BO - max_iter:",max_iter)
 
         if self.objective is None:
             raise InvalidConfigError("Cannot run the optimization loop without the objective function")
@@ -116,12 +119,18 @@ class BO(object):
         else:
             self.max_iter = max_iter
             self.max_time = max_time
+    
+        print("#BO - max_iter:",self.max_iter)
+        print("#BO - max_time:",self.max_time)
 
         # --- Initial function evaluation and model fitting
         if self.X is not None and self.Y is None:
             self.Y, cost_values = self.objective.evaluate(self.X)
-            if self.cost.cost_type == 'evaluation_time':
-                self.cost.update_cost_model(self.X, cost_values)
+            #ragu edit
+            #if self.cost.cost_type 'evaluation_time': 
+            #    self.cost.update_cost_model(self.X, cost_values)
+            #ragu add
+            self.rmse_dict_list = cost_values
 
         # --- Initialize iterations and running time
         self.time_zero = time.time()
@@ -131,15 +140,23 @@ class BO(object):
         self.Y_new = self.Y
 
         # --- Initialize time cost of the evaluations
+        cur_iterr = 1
+        print("#BO starting..")
         while (self.max_time > self.cum_time):
+            print("#BO - cur_iter: ",cur_iterr)
             # --- Update model
-            try:
-                self._update_model(self.normalization_type)
-            except np.linalg.linalg.LinAlgError:
-                break
+            #try:
+            self._update_model(self.normalization_type)
+            #except np.linalg.linalg.LinAlgError:
+            #    break
 
             if (self.num_acquisitions >= self.max_iter
-                    or (len(self.X) > 1 and self._distance_last_evaluations() <= self.eps)):
+                    or (len(self.X) > 1 and self._distance_last_evaluations() < self.eps)): #Ragu: changes <= to <
+                print("#BO Exit conditions:")
+                print("self.num_acquisitions >= self.max_iter: ",self.num_acquisitions >= self.max_iter, " | self.num_acquisitions: ",self.num_acquisitions," |  self.max_iter: ",self.max_iter)
+                print("len(self.X) > 1: ",(len(self.X) > 1)," | ",len(self.X))
+                print("self._distance_last_evaluations() <= self.eps: ",self._distance_last_evaluations() <= self.eps," | self._distance_last_evaluations(): ",self._distance_last_evaluations()," | self.eps: ",self.eps)
+                print("#")
                 break
 
             self.suggested_sample = self._compute_next_evaluations()
@@ -157,7 +174,7 @@ class BO(object):
             if verbosity:
                 print("num acquisition: {}, time elapsed: {:.2f}s".format(
                     self.num_acquisitions, self.cum_time))
-
+            cur_iterr+=1
         # --- Stop messages and execution time
         self._compute_results()
 
@@ -173,7 +190,7 @@ class BO(object):
         """
         Prints the reason why the optimization stopped.
         """
-
+        # --- Print stopping reason
         if self.verbosity:
             if (self.num_acquisitions == self.max_iter) and (not self.initial_iter):
                 print('   ** Maximum number of iterations reached **')
@@ -189,22 +206,60 @@ class BO(object):
                 print('** GPyOpt Bayesian Optimization class initialized successfully **')
                 self.initial_iter = False
 
-
+    
     def evaluate_objective(self):
         """
         Evaluates the objective
         """
         self.Y_new, cost_new = self.objective.evaluate(self.suggested_sample)
-        self.cost.update_cost_model(self.suggested_sample, cost_new)
+        #ragu edit
+        #self.cost.update_cost_model(self.suggested_sample, cost_new)
         self.Y = np.vstack((self.Y,self.Y_new))
+        #ragu add
+        self.rmse_dict_list += cost_new
+
+
+    #ragu edit - start
+    def _best_value_mod(self,Y,sign=1):
+        #print("#best_value_mod#")
+        #print("before Y.shape: ",Y.shape)
+        '''
+        Returns a vector whose components i are the minimum (default) or maximum of Y[:i]
+        '''
+        Y = np.atleast_2d(np.sum(Y,axis=1)).T
+        #print("after Y.shape: ",Y.shape)
+        n = Y.shape[0]
+        #print("n: ",n)
+        Y_best = np.ones(n)
+        for i in range(n):
+            if sign == 1:
+                Y_best[i]=Y[:(i+1)].min()
+            else:
+                Y_best[i]=Y[:(i+1)].max()
+        return Y_best
 
     def _compute_results(self):
         """
         Computes the optimum and its value.
         """
-        self.Y_best = best_value(self.Y)
-        self.x_opt = self.X[np.argmin(self.Y),:]
-        self.fx_opt = np.min(self.Y)
+        #self.Y_best = best_value(self.Y)
+        #print("_compute_results: ")
+        #print("X.shape: ",self.X.shape)
+        #print("Y.shape: ",self.Y.shape)
+        self.Y_best = self._best_value_mod(self.Y)
+        Ytemp = np.atleast_2d(np.sum(self.Y,axis=1)).T
+        self.x_opt = self.X[np.argmin(Ytemp),:]
+        self.fx_opt = np.min(Ytemp)
+
+    # def _compute_results(self):
+    #     """
+    #     Computes the optimum and its value.
+    #     """
+    #     self.Y_best = best_value(self.Y)
+    #     self.x_opt = self.X[np.argmin(self.Y),:]
+    #     self.fx_opt = np.min(self.Y)
+
+    #ragu edit - end
 
     def _distance_last_evaluations(self):
         """
@@ -268,7 +323,9 @@ class BO(object):
             if self.input_dim = 2: as before but it separates the mean and variance of the model in two different plots
         :param filename: name of the file where the plot is saved
         """
+        print("plot_acquisition")
         if self.model.model is None:
+            print("Using self.model.model")
             from copy import deepcopy
             model_to_plot = deepcopy(self.model)
             if self.normalize_Y:
@@ -277,13 +334,50 @@ class BO(object):
                 Y = self.Y
             model_to_plot.updateModel(self.X, Y, self.X, Y)
         else:
+            print("Using self.model")
             model_to_plot = self.model
+
+        print("model_to_plot.model.X.shape: ",model_to_plot.model.X.shape)
+        print()
 
         return plot_acquisition(self.acquisition.space.get_bounds(),
                                 model_to_plot.model.X.shape[1],
                                 model_to_plot.model,
                                 model_to_plot.model.X,
                                 model_to_plot.model.Y,
+                                self.acquisition.acquisition_function,
+                                self.suggest_next_locations(),
+                                filename)
+
+    def plot_acquisition2(self,filename=None):
+        """
+        Plots the model and the acquisition function.
+            if self.input_dim = 1: Plots data, mean and variance in one plot and the acquisition function in another plot
+            if self.input_dim = 2: as before but it separates the mean and variance of the model in two different plots
+        :param filename: name of the file where the plot is saved
+        """
+        print("plot_acquisition2")
+        if self.model.model is None:
+            print("Using self.model.model")
+            from copy import deepcopy
+            model_to_plot = deepcopy(self.model)
+            if self.normalize_Y:
+                Y = normalize(self.Y, self.normalization_type)
+            else:
+                Y = self.Y
+            model_to_plot.updateModel(self.X, Y, self.X, Y)
+        else:
+            print("Using self.model")
+            model_to_plot = self.model
+
+        print("model_to_plot.model.X.shape: ",model_to_plot.model.X.shape)
+        print()
+
+        return plot_acquisition2(self.acquisition.space.get_bounds(),
+                                model_to_plot.X.shape[1],
+                                model_to_plot,
+                                model_to_plot.X,
+                                model_to_plot.Y,
                                 self.acquisition.acquisition_function,
                                 self.suggest_next_locations(),
                                 filename)
@@ -302,7 +396,7 @@ class BO(object):
 
     def save_report(self, report_file= None):
         """
-        Saves a report with the main results of the optimization.
+        Saves a report with the main resutls of the optimization.
 
         :param report_file: name of the file in which the results of the optimization are saved.
         """
@@ -366,7 +460,7 @@ class BO(object):
 
     def save_evaluations(self, evaluations_file = None):
         """
-        Saves  evaluations at each iteration of the optimization
+        Saves a report with the results of the iterations of the optimization
 
         :param evaluations_file: name of the file in which the results are saved.
         """
@@ -379,7 +473,7 @@ class BO(object):
 
     def save_models(self, models_file):
         """
-        Saves model parameters at each iteration of the optimization
+        Saves a report with the results of the iterations of the optimization
 
         :param models_file: name of the file or a file buffer, in which the results are saved.
         """
